@@ -17,7 +17,9 @@ Three basic finite volume methods are implemented in the code: (1) a piecewise c
 
 ![Numerics plot](assets/H2Odensity.png "Density plot for a water-saturated rhyolitic magma expanding into a water vapour, modeled as an ideal gas.")
 
-Shock tube problem using solubility law for water in basalt from Wilson & Head (ref. in Turcotte et al. 1990). Initial conditions have volume fraction equal to 1 - ε on the left (nearly-saturated magma) and zero on the right (flux Jacobian is undefined at f = 1). Rarefaction wave propagates to the left. Contact discontinuity (interface between foamy magma-vapour mixture and the gas phase) and gas shock propagate to the right. The latter two discontinuous waves are smeared out by the numerical scheme.
+**Figure**: Shock tube problem using solubility law for water in basalt from Wilson & Head (ref. in Turcotte et al. 1990). Initial conditions have volume fraction equal to 1 - ε on the left (nearly-saturated magma) and zero on the right (flux Jacobian is undefined at f = 1). Rarefaction wave propagates to the left. Contact discontinuity (interface between foamy magma-vapour mixture and the gas phase) and gas shock propagate to the right. The latter two discontinuous waves are smeared out by the numerical scheme. Artificial values of T = 300 K, gas constant for air, dry magma density 2 kg/m^3, and mass concentration of 1.0 are used to get a baseline case for the numerics. See commit 9e2aab1.
+
+
 
 ## Usage
 ▶️ The main file is **shocktube.m**. The code uses simple parallelization to make my slow code faster. If this is not desired, replace *parfor* with *for* everywhere.
