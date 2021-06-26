@@ -16,22 +16,22 @@
 
 %% Physics parameters
 % Isothermal parameters
-R = 460;    % Water
+R = 8.314/44.01*1e3;    % CO2
 T0 = 1500;  % K
 E0 = R * T0;
 % Magma mixture properties
-rho10 = 8; % Dry magma density (kept low for a smaller contrast)
+rho10 = 2.7; % Dry magma density (kept low for a smaller contrast)
 X0 = 12;  % Mass concentration of volatile
 % Henry's law for H2O in basaltic magma Wilson & Head (1981)
-k = 2.15e-4;
-n = 0.7;
+k = 2.3e-6;
+n = 1;
 p0 = (X0/k)^(1.0/n);
 %% Meshing
 Ncores = 12;
-mesh.x = linspace(-0.1,0.1,12*Ncores)';
+mesh.x = linspace(-100,100,12*Ncores)';
 dx = mesh.x(2) - mesh.x(1);
 dt = dx/8000;
-tFinal = 5e-5;
+tFinal = 5e-2;
 tVec = 0:dt:tFinal;
 %% Set initial conditions
 f0 = (1-1e-5)*(mesh.x < 0);
@@ -90,34 +90,82 @@ grid on
 grid minor
 
 %% View density
+rhoFinal = soln{1}(:,1,end);
+uFinal = soln{1}(:,2,end)./soln{1}(:,1,end);
+fFinal = soln{1}(:,3,end);
+pFinal = arrayfun(@(rho, u, f) pFn(rho, u, f, E0, rho10, X0, n, p0), ...
+        q(:,1), q(:,2)./q(:,1), q(:,3) );
+    
 figure(779); clf;
-subplot(3,1,1);
-semilogy(mesh.x, soln{1}(:,1,end), '.-', 'LineWidth', 1);
+subplot(4,1,1);
+plot(mesh.x, rhoFinal, '.-', 'LineWidth', 1);
 xlabel 'x [m]'
 ylabel '\rho [kg/m^3]'
-title("t = " + tFinal)
+title("t = " + tFinal + " s")
 grid on
 grid minor
 
-subplot(3,1,2);
-semilogy(mesh.x, soln{1}(:,2,end)./soln{1}(:,1,end), '.-', 'LineWidth', 1);
+subplot(4,1,2);
+plot(mesh.x, uFinal, '.-', 'LineWidth', 1);
 xlabel 'x [m]'
 ylabel 'u [m/s]'
-title("t = " + tFinal)
+title("t = " + tFinal + " s")
 grid on
 grid minor
-xlim([-.1, .1])
-ylim([1e-2, 1e4])
 
-subplot(3,1,3);
-semilogy(mesh.x, soln{1}(:,3,end), '.-', 'LineWidth', 1);
+subplot(4,1,3);
+plot(mesh.x, fFinal, '.-', 'LineWidth', 1);
 xlabel 'x [m]'
 ylabel 'f'
-title("t = " + tFinal)
+title("t = " + tFinal + " s")
 grid on
 grid minor
-xlim([-.1, .1])
-ylim([1e-3, 1e0])
+
+subplot(4,1,4);
+plot(mesh.x, pFinal, '.-', 'LineWidth', 1);
+xlabel 'x [m]'
+ylabel 'p'
+title("t = " + tFinal + " s")
+grid on
+grid minor
+
+%% Nondimensional plots
+nondim.u = uFinal * sqrt(rho10 / p0);
+nondim.eps = p0 / rho10 / R / T0;
+nondim.p = pFinal / p0;
+
+% Get rarefaction solution from theory
+theory.x = sqrt(p0/rho10) * tFinal * ...
+    (-coeff*log(nondim.p) - ...
+    (X0 + nondim.p*(nondim.eps - X0))/sqrt(nondim.eps*X0*(1+X0)));
+% Fill with unperturbed magma to the left of rarefaction fan extent
+theory.x = [mesh.x(1); theory.x];
+% Reuse p from numeric solution only as the range
+theory.p = [1; nondim.p];
+
+figure(780); clf;
+subplot(1,2,1);
+coeff = sqrt(X0 / nondim.eps / (1 + X0));
+plot(mesh.x, nondim.u, '.-', 'LineWidth', 1);
+hold on
+plot(mesh.x, -coeff*log(nondim.p), '.-', 'LineWidth', 1)
+legend({'$u / \sqrt{\rho_{10} / p_0}$', ...
+    '$-[ \frac{X_0}{\varepsilon(1 + X_0)} ]^{1/2} \ln \frac{p}{p_0}$'}, ...
+    'Interpreter', 'latex', 'FontSize', 14, 'location', 'northwest')
+xlabel ('$x$ [m]', 'Interpreter', 'latex')
+ylabel ('$u / \sqrt{\rho_{10} / p_0}$', 'Interpreter', 'latex')
+title ("t = " + tFinal +" s")
+
+subplot(1,2,2);
+plot(mesh.x, nondim.p, '.-', 'LineWidth', 1);
+hold on
+plot(theory.x, theory.p, '-', 'LineWidth', 1);
+legend({'Numerical solution', ...
+    'Exact expansion fan, $n = 1$'}, ...
+    'Interpreter', 'latex', 'FontSize', 12, 'location', 'northeast')
+xlabel ('$x$ [m]', 'Interpreter', 'latex')
+ylabel ('$p / p_0$', 'Interpreter', 'latex')
+title ("t = " + tFinal +" s")
 
 %% Examine flux Jacobian eigenvalues
 % Extra post process step to look at eigenvalues at some point in the final
@@ -129,7 +177,7 @@ fQuery = qQuery(3);
 
 A = fluxJacobian(qQuery(1), qQuery(2)/qQuery(1), qQuery(3), ...
     E0, rho10, X0, n, p0);
-[R, L] = eig(A);
+[eigVecs, eigVals] = eig(A);
 
 %% Plotting function
 function plotState(x, q, E0, rho10, X0, n, p0)
