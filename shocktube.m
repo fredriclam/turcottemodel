@@ -16,27 +16,27 @@
 
 %% Physics parameters
 % Isothermal parameters
-R = 287;
-T0 = 300;
+R = 460;    % Water
+T0 = 1500;  % K
 E0 = R * T0;
 % Magma mixture properties
-rho10 = 2; % Dry magma density
-X0 = 1;  % Mass concentration of volatile
+rho10 = 8; % Dry magma density (kept low for a smaller contrast)
+X0 = 12;  % Mass concentration of volatile
 % Henry's law for H2O in basaltic magma Wilson & Head (1981)
 k = 2.15e-4;
 n = 0.7;
 p0 = (X0/k)^(1.0/n);
 %% Meshing
 Ncores = 12;
-mesh.x = linspace(-0.1,0.1,16*Ncores)';
+mesh.x = linspace(-0.1,0.1,12*Ncores)';
 dx = mesh.x(2) - mesh.x(1);
-dt = dx/500;
-tFinal = 2e-4;
+dt = dx/8000;
+tFinal = 5e-5;
 tVec = 0:dt:tFinal;
 %% Set initial conditions
 f0 = (1-1e-5)*(mesh.x < 0);
 u0 = zeros(size(mesh.x));
-pg = p0/2;          % Yes, the gas pressure (pg) must be quite small
+pg = 101.3e3;          % Yes, the gas pressure (pg) must be quite small
 rhog0 = pg / (R * T0);   
 rho0 = rhog0 * ones(size(mesh.x)); % Gas density fill
 rho0(mesh.x < 0) = rho10*(1 + X0);     % Replace with mixture density
@@ -44,7 +44,10 @@ q0 = [rho0, rho0.*u0, f0];
 %% Forward Euler
 methods = {'MatrixSplit-0', 'LF-1', 'LLF-0'};
 soln = {};
+timings = {};
+figure(777); clf;
 for idxMethod = 1:length(methods)
+    timerStart = tic;
     method = methods{idxMethod};
     % Initialize data storage
     qData = nan(length(mesh.x),3,length(tVec));
@@ -65,11 +68,13 @@ for idxMethod = 1:length(methods)
         % Save data
         qData(:,:,i) = q;
         % Plot states
-        figure(777); clf;
+        clf;
         plotState(mesh.x, q, E0, rho10, X0, n, p0);
+        drawnow;
         title("t = " + t);
     end
     soln{idxMethod} = qData;
+    timings{idxMethod} = toc(timerStart);
 end
 
 %% Post-process plotting
@@ -84,28 +89,70 @@ legend({'Matrix Split p0', 'Lax-Friedrichs p1 (Van Leer)', 'Rusanov p0'})
 grid on
 grid minor
 
+%% View density
+figure(779); clf;
+subplot(3,1,1);
+semilogy(mesh.x, soln{1}(:,1,end), '.-', 'LineWidth', 1);
+xlabel 'x [m]'
+ylabel '\rho [kg/m^3]'
+title("t = " + tFinal)
+grid on
+grid minor
+
+subplot(3,1,2);
+semilogy(mesh.x, soln{1}(:,2,end)./soln{1}(:,1,end), '.-', 'LineWidth', 1);
+xlabel 'x [m]'
+ylabel 'u [m/s]'
+title("t = " + tFinal)
+grid on
+grid minor
+xlim([-.1, .1])
+ylim([1e-2, 1e4])
+
+subplot(3,1,3);
+semilogy(mesh.x, soln{1}(:,3,end), '.-', 'LineWidth', 1);
+xlabel 'x [m]'
+ylabel 'f'
+title("t = " + tFinal)
+grid on
+grid minor
+xlim([-.1, .1])
+ylim([1e-3, 1e0])
+
+%% Examine flux Jacobian eigenvalues
+% Extra post process step to look at eigenvalues at some point in the final
+% solution.
+qQuery = soln{1}(length(mesh.x)/2,:,end);
+rhoQuery = qQuery(1);
+uQuery = qQuery(2)/rhoQuery;
+fQuery = qQuery(3);
+
+A = fluxJacobian(qQuery(1), qQuery(2)/qQuery(1), qQuery(3), ...
+    E0, rho10, X0, n, p0);
+[R, L] = eig(A);
+
 %% Plotting function
 function plotState(x, q, E0, rho10, X0, n, p0)
     subplot(2,2,1);
-    plot(x, q(:,1));
+    plot(x, q(:,1), '.-');
     xlabel 'x'
     ylabel '\rho'
     yL = ylim;
     ylim([0, yL(2)])
 
     subplot(2,2,2);
-    plot(x, q(:,2) ./ q(:,1));
+    plot(x, q(:,2) ./ q(:,1), '.-');
     xlabel 'x'
     ylabel 'u'
 
     subplot(2,2,3);
-    plot(x, q(:,3));
+    plot(x, q(:,3), '.-');
     xlabel 'x'
     ylabel 'f'
     
     subplot(2,2,4);
     plot(x, arrayfun(@(rho, u, f) pFn(rho, u, f, E0, rho10, X0, n, p0), ...
-        q(:,1), q(:,2)./q(:,1), q(:,3) ));
+        q(:,1), q(:,2)./q(:,1), q(:,3) ), '.-');
     xlabel 'x'
     ylabel 'p'
 end
@@ -124,11 +171,10 @@ function p_ = pFn(rho, u, f, E0, rho10, X0, n, p0)
 %     plot(searchAxis, pFn(searchAxis));
     [p_, ~, exitflag] = fsolve( ...
         pFn,pGuess,optimoptions('fsolve','Display','off', ...
-            'MaxIterations', 400));
+            'MaxIterations', 100000));
     if exitflag ~= 1 && exitflag ~= 2
         % Non-physical state (probably p < 0, meaning more exsolution
         % than possible). Consider using lower contrast in the initial.
-        p_ = 1e-4;
         error("Extrapolated to a negative pressure." + ...
               "More exsolution than possible." + ...
               "Initial condition may be unsound.")
@@ -160,6 +206,10 @@ A = [0, 1, 0;
      -u.^2 + dpdrho(rho, u, f, E0, rho10, X0, n, p0), 2*u, ...
          dpdf(rho, u, f, E0, rho10, X0, n, p0);
      -f .* u ./ rho, f ./ rho, u];
+
+% % Wavespeed
+% c = sqrt(f / rho * dpdf(rho, u, f, E0, rho10, X0, n, p0) + ...
+%      dpdrho(rho, u, f, E0, rho10, X0, n, p0));
 end
 
 function fl = fluxFn(rho, u, f, E0, rho10, X0, n, p0)
